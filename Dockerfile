@@ -23,6 +23,9 @@ WORKDIR /app
 COPY packages/shared ./packages/shared
 COPY apps/api ./apps/api
 
+# Build shared first — apps/api imports from @sdr-solar/shared/dist
+RUN npm run build --workspace=packages/shared
+
 # Generate Prisma client and compile TypeScript
 WORKDIR /app/apps/api
 RUN npx prisma generate
