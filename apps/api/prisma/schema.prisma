@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Lead {
+  id             String        @id @default(cuid())
+  name           String
+  phone          String        @unique
+  email          String?
+  city           String?
+  neighborhood   String?
+  energyBill     Float?
+  propertyType   String?
+  ownProperty    Boolean?
+  whatsappJid    String?       @unique
+  source         String        @default("meta_ads")
+  adId           String?
+  formId         String?
+  status         LeadStatus    @default(NEW)
+  score          Int           @default(0)
+  consultantId   String?
+  scheduledAt    DateTime?
+  followUpCount  Int           @default(0)
+  lastContactAt  DateTime?
+  conversations  Conversation[]
+  consultant     Consultant?   @relation(fields: [consultantId], references: [id])
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([phone])
+}
+
+model Conversation {
+  id         String            @id @default(cuid())
+  leadId     String
+  lead       Lead              @relation(fields: [leadId], references: [id])
+  messages   Message[]
+  state      ConversationState @default(INITIAL_CONTACT)
+  // activeKey enforces single-active-conversation-per-lead at DB level.
+  // Set to leadId while the conversation is active; set to NULL when CLOSED,
+  // ESCALATED, or NO_RESPONSE so a new conversation can be created later.
+  activeKey  String?           @unique
+  // When true: Ana stops auto-responding (manual takeover by a human attendant).
+  // Follow-ups and scheduled callbacks also pause while this is true.
+  aiPaused   Boolean           @default(false)
+  metadata   Json?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@index([leadId])
+  @@index([state])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  role           String
+  content        String       @db.Text
+  sentAt         DateTime     @default(now())
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  whatsappId     String?
+  metadata       Json?
+
+  @@index([conversationId])
+  @@index([sentAt])
+}
+
+model Consultant {
+  id         String   @id @default(cuid())
+  name       String
+  phone      String   @unique
+  email      String   @unique
+  regions    String[]
+  calendarId String
+  active     Boolean  @default(true)
+  leads      Lead[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([active])
+}
+
+model KnowledgeEntry {
+  id          String   @id @default(cuid())
+  category    String
+  question    String   @db.Text
+  answer      String   @db.Text
+  embedding   Float[]
+  tags        String[]
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  @@index([active])
+}
+
+model LeadMetric {
+  id              String   @id @default(cuid())
+  date            DateTime @db.Date
+  totalLeads      Int      @default(0)
+  contacted5Min   Int      @default(0)
+  responded       Int      @default(0)
+  qualified       Int      @default(0)
+  scheduled       Int      @default(0)
+  visited         Int      @default(0)
+  won             Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  @@unique([date])
+  @@index([date])
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  SCHEDULED
+  VISITED
+  PROPOSAL_SENT
+  WON
+  LOST
+  DISQUALIFIED
+  ESCALATED
+}
+
+enum ConversationState {
+  INITIAL_CONTACT
+  QUALIFYING
+  SCHEDULING
+  CONFIRMED
+  NO_RESPONSE
+  ESCALATED
+  CLOSED
+}
