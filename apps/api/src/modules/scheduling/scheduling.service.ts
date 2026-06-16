@@ -120,6 +120,12 @@ export async function checkCalendar(
       return await generateFallbackSlots()
     }
 
+    // Google OK but every checked slot was busy — fall back so Ana never says "lotado".
+    if (slots.length === 0) {
+      log.warn({ city }, 'Calendar OK but no free slots in window — using fallback')
+      return await generateFallbackSlots()
+    }
+
     return slots.sort((a, b) => a.startTime.getTime() - b.startTime.getTime())
   } catch (err) {
     log.error({ city, err }, 'Failed to check calendar')
@@ -238,18 +244,25 @@ async function generateFallbackSlots(): Promise<VisitSlot[]> {
   }
 
   const slots: VisitSlot[] = []
-  const start = dayjs().add(2, 'day').hour(9).minute(0).second(0)
-
-  for (let i = 0; i < 3; i++) {
-    const day = start.add(i, 'day')
+  const hourSlots = [8, 9, 10, 11, 14, 15, 16] // alguns horários espalhados em dia útil
+  // Começa amanhã (não em 2 dias) pra Ana ter algo concreto pra oferecer ainda hoje
+  let day = dayjs().add(1, 'day').hour(0).minute(0).second(0)
+  let daysAdded = 0
+  while (daysAdded < 5 && slots.length < 10) {
     if (day.day() !== 0 && day.day() !== 6) {
-      slots.push({
-        consultantId: consultant.id,
-        consultantName: consultant.name,
-        startTime: day.toDate(),
-        endTime: day.add(2, 'hour').toDate(),
-      })
+      for (const hour of hourSlots) {
+        const start = day.hour(hour).minute(0).second(0)
+        slots.push({
+          consultantId: consultant.id,
+          consultantName: consultant.name,
+          startTime: start.toDate(),
+          endTime: start.add(2, 'hour').toDate(),
+        })
+        if (slots.length >= 10) break
+      }
+      daysAdded++
     }
+    day = day.add(1, 'day')
   }
 
   return slots
