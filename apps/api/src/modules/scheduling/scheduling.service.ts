@@ -70,15 +70,16 @@ export async function checkCalendar(
           const dayOfWeek = current.day()
           if (dayOfWeek !== 0 && dayOfWeek !== 6) {
             // Not weekend
-            // Slots: manhã (9, 11), tarde (14, 16), noite (19)
-            // Noite só atende quem só pode após o expediente — não oferece por padrão
+            // Slots cheios de hora em hora — visita dura 2h, mas mostramos só o início.
+            // Manhã: 8-11 (last start 11h, ends 13h) | Tarde: 12-17 | Noite: 18-19 (last start 19h, ends 21h)
+            // Noite só oferece se lead pedir explicitamente.
             const hourSlots = preferredPeriod === 'manha'
-              ? [9, 11]
+              ? [8, 9, 10, 11]
               : preferredPeriod === 'tarde'
-              ? [14, 16]
+              ? [12, 13, 14, 15, 16, 17]
               : preferredPeriod === 'noite'
-              ? [19]
-              : [9, 11, 14, 16]   // 'qualquer' / default: NÃO oferece 19h espontaneamente
+              ? [18, 19]
+              : [8, 9, 10, 11, 12, 13, 14, 15, 16, 17]   // 'qualquer': não oferece 18-19h espontaneamente
 
             for (const hour of hourSlots) {
               const slotStart = current.hour(hour).minute(0).second(0)
