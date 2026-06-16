@@ -1,3 +1,5 @@
+import './sentry'
+import * as Sentry from '@sentry/node'
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
@@ -22,6 +24,20 @@ async function buildApp() {
   const app = Fastify({
     logger: false, // We use pino directly
     disableRequestLogging: true,
+  })
+
+  // ─── Sentry error handler ────────────────────────────────────────────────
+  app.setErrorHandler((error, request, reply) => {
+    if (env.sentry.dsn) {
+      Sentry.captureException(error, {
+        tags: { route: request.routerPath ?? request.url, method: request.method },
+      })
+    }
+    log.error({ err: error, url: request.url }, 'Request error')
+    reply.status(error.statusCode ?? 500).send({
+      error: error.name || 'InternalServerError',
+      message: error.message || 'Something went wrong',
+    })
   })
 
   // ─── Plugins ───────────────────────────────────────────────────────────────
