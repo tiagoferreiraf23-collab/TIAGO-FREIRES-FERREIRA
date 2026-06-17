@@ -1,11 +1,33 @@
 import type Anthropic from '@anthropic-ai/sdk'
+import dayjs from 'dayjs'
+import utc from 'dayjs/plugin/utc'
+import timezone from 'dayjs/plugin/timezone'
 import { prisma } from '../../prisma/client'
 import { createChildLogger } from '../../logger'
 import { LeadStatus, ConversationState } from '@sdr-solar/shared'
 import { checkCalendar, scheduleVisit } from '../../modules/scheduling/scheduling.service'
 import { notifyTeam } from '../../modules/notifications/notifications.service'
 
+dayjs.extend(utc)
+dayjs.extend(timezone)
+
 const log = createChildLogger('ai:tools')
+
+/**
+ * Parse a datetime string as Fortaleza local time (BRT, UTC-3).
+ *
+ * Ana frequently sends times like "2026-06-18T14:00:00" without a timezone.
+ * On Railway (UTC server) `new Date()` would treat that as 14:00 UTC,
+ * which displays as 11:00 BRT — exactly the 3h drift bug seen in prod.
+ *
+ * If the string already has Z or an offset, we trust it. Otherwise we
+ * force-interpret as America/Sao_Paulo and convert to a UTC Date.
+ */
+function parseAsBRT(input: string): Date {
+  const hasTz = input.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(input)
+  if (hasTz) return new Date(input)
+  return dayjs.tz(input, 'America/Sao_Paulo').toDate()
+}
 
 export const SDR_TOOLS: Anthropic.Tool[] = [
   {
@@ -213,7 +235,7 @@ export async function executeToolCall(
         const input = toolInput as ToolInput['schedule_visit']
         const result = await scheduleVisit(
           input.leadId,
-          new Date(input.dateTime),
+          parseAsBRT(input.dateTime),
           input.consultantId,
         )
         return JSON.stringify(result)
