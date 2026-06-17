@@ -14,19 +14,21 @@ dayjs.extend(timezone)
 const log = createChildLogger('ai:tools')
 
 /**
- * Parse a datetime string as Fortaleza local time (BRT, UTC-3).
+ * Parse a datetime string as Fortaleza local time (BRT, UTC-3) — ALWAYS.
  *
- * Ana frequently sends times like "2026-06-18T14:00:00" without a timezone.
- * On Railway (UTC server) `new Date()` would treat that as 14:00 UTC,
- * which displays as 11:00 BRT — exactly the 3h drift bug seen in prod.
+ * Ana speaks in Fortaleza time. Any "Z" or offset she sends is a model
+ * mistake, not a deliberate signal. So we strip any timezone marker
+ * (Z or ±HH:MM) and force-interpret the remaining wall-clock string as
+ * America/Sao_Paulo. This is robust against the LLM ignoring the prompt
+ * rule about dateTime format.
  *
- * If the string already has Z or an offset, we trust it. Otherwise we
- * force-interpret as America/Sao_Paulo and convert to a UTC Date.
+ * Trade-off: if a non-LLM caller (future webhook, n8n, etc.) deliberately
+ * sends UTC, it will be misinterpreted. Today only Ana calls this, so it's
+ * fine. Revisit if external callers are added.
  */
 function parseAsBRT(input: string): Date {
-  const hasTz = input.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(input)
-  if (hasTz) return new Date(input)
-  return dayjs.tz(input, 'America/Sao_Paulo').toDate()
+  const stripped = input.replace(/Z$|[+-]\d{2}:?\d{2}$/, '')
+  return dayjs.tz(stripped, 'America/Sao_Paulo').toDate()
 }
 
 export const SDR_TOOLS: Anthropic.Tool[] = [
