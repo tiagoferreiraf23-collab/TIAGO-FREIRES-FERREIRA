@@ -153,7 +153,13 @@ export async function handleIncomingMessage(data: {
   // Schedule a fresh follow-up anchored on this Ana message. If the lead
   // responds before it fires, the worker will see the newer user message
   // and skip itself — naturally resetting the timer.
-  if (agentResponse.message) {
+  //
+  // SKIP follow-up if Ana already scheduled a callback this turn: the callback
+  // IS the "next contact" the lead asked for. Without this, Ana confirms
+  // "te chamo no final do dia" and the 5-min generic follow-up fires anyway —
+  // exactly the bug seen with the lead Tamyris on 2026-06-19.
+  const calledCallback = agentResponse.toolsUsed?.includes('schedule_callback')
+  if (agentResponse.message && !calledCallback) {
     const { enqueueFollowUp } = await import('../../queues')
     await enqueueFollowUp(lead.id, 1, new Date())
   }
