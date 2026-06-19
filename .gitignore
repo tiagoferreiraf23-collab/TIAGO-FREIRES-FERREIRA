@@ -49,6 +49,9 @@ wppconnect.config.json
 RELATORIO.md
 *.tmp
 
+# ─── Scripts locais (podem conter URLs/senhas) ─────────────
+apps/api/scripts/
+
 # ─── Prisma ────────────────────────────────────────────────
 *.db
 *.db-journal

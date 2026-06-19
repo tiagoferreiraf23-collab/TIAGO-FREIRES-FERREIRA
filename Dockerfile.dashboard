@@ -1,0 +1,54 @@
+# Production Dockerfile for the Next.js dashboard — built from MONOREPO ROOT
+# (so the build context can see packages/shared and the root lockfile).
+
+# ─── Stage 1: install deps ──────────────────────────────────────────────────
+FROM node:20-slim AS deps
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json ./packages/shared/
+COPY apps/dashboard/package.json ./apps/dashboard/
+
+RUN npm ci --no-audit --no-fund
+
+# ─── Stage 2: build ─────────────────────────────────────────────────────────
+FROM deps AS builder
+WORKDIR /app
+
+COPY packages/shared ./packages/shared
+COPY apps/dashboard ./apps/dashboard
+
+# shared must compile first because dashboard imports from its dist
+RUN npm run build --workspace=packages/shared
+
+# Next 14 standalone build — produces a minimal node server bundle
+WORKDIR /app/apps/dashboard
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+# ─── Stage 3: production runtime ────────────────────────────────────────────
+FROM node:20-slim AS production
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# wget is used by the healthcheck below
+RUN apt-get update -y && apt-get install -y --no-install-recommends wget ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Next standalone output already contains a minimal node_modules tree
+COPY --from=builder /app/apps/dashboard/.next/standalone ./
+COPY --from=builder /app/apps/dashboard/.next/static ./apps/dashboard/.next/static
+# public/ may not exist in this project — skip if missing (won't fail)
+COPY --from=builder /app/apps/dashboard/public* ./apps/dashboard/
+
+WORKDIR /app/apps/dashboard
+
+# Railway provides PORT — fall back to 3001
+ENV PORT=3001
+ENV HOSTNAME=0.0.0.0
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- http://localhost:${PORT:-3001}/ >/dev/null || exit 1
+
+CMD ["node", "server.js"]
