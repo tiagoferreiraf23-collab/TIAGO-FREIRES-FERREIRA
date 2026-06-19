@@ -518,9 +518,9 @@ Responda sempre em português brasileiro natural e informal.`
 }
 
 export const FOLLOW_UP_CONTEXTS = {
-  1: 'Follow-up 1 (5 min em silêncio) — pergunta gentil se o lead pode responder em alguns minutos. Tom leve, UMA frase, sem cobrar.',
-  2: 'Follow-up 2 (15 min depois) — chama a atenção com leveza, tipo "ei, ainda por aí?". UMA frase.',
-  3: 'Follow-up 3 (2 horas depois) — lembrança breve e respeitosa, deixa claro que está disponível.',
+  1: 'Follow-up 1 (5 min em silêncio) — RETOMA o ponto onde a conversa parou (reforça o que pediu). NUNCA oferece "mais tarde". UMA frase propositiva.',
+  2: 'Follow-up 2 (15 min depois) — mostra disponibilidade ("tô aqui, qualquer coisa me sinaliza"). NUNCA oferece "mais tarde". UMA frase.',
+  3: 'Follow-up 3 (2 horas depois) — reforça o benefício de continuar ("em 5 min você tem a simulação"). Sem oferecer "mais tarde".',
   4: 'Follow-up 4 (dia seguinte às 7 da manhã) — bom dia + retomada do assunto. Tom de novo dia, positivo.',
   5: 'Follow-up 5 (2 dias depois) — última cobrança gentil, sem pressão. "Ainda estou por aqui se precisar".',
 } as const

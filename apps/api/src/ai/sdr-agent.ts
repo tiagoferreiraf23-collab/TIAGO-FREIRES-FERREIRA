@@ -382,10 +382,10 @@ export async function generateFollowUpMessage(lead: {
     : `O nome do lead é ${firstName}. SEMPRE chame ele pelo nome na mensagem.`
 
   const followUpPrompts: Record<number, string> = {
-    1: `Gere um follow-up CURTO (1 frase, no máximo 2). Contexto: o lead está em silêncio há 5 minutos desde sua última mensagem. Pergunte com leveza se ele consegue te responder em alguns minutos. Tom gentil, sem cobrar. NUNCA repita o cumprimento de apresentação. ${nameHint}`,
-    2: `Gere um follow-up CURTO. Contexto: sem resposta há 15 minutos desde o primeiro lembrete. Tente chamar a atenção dele de forma leve e curiosa, tipo "ei, ainda por aí?" ou similar. UMA frase. Sem cobrança. ${nameHint}`,
-    3: `Gere um follow-up CURTO. Contexto: sem resposta há ~2 horas. Lembre brevemente que você está disponível pra continuar quando ele puder. Tom respeitoso e descontraído. UMA frase. ${nameHint}`,
-    4: `Gere um follow-up para a manhã do dia seguinte (são 7 da manhã). Comece com "Bom dia!" e retome o assunto onde parou de forma leve e positiva. Tom de novo dia, otimista. 1-2 frases curtas. ${nameHint}`,
+    1: `Gere um follow-up CURTO (1 frase, no máximo 2). Contexto: o lead está em silêncio há 5 minutos desde sua ÚLTIMA pergunta/pedido a ele. RETOME exatamente o ponto onde a conversa parou — repita ou reforce o que você pediu, de forma propositiva e leve. Exemplo: se você pediu o endereço, diga "Tamyris, ainda tô esperando o endereço pra mandar pra equipe técnica analisar 😊". 🚨 NUNCA ofereça "mais tarde" como opção (frase tipo "te chamo depois" ou "consegue me responder agora ou prefere outro horário?" SEMPRE faz o cliente procrastinar — bug confirmado em prod com a lead Tamyris). NUNCA repita cumprimento de apresentação. ${nameHint}`,
+    2: `Gere um follow-up CURTO. Contexto: sem resposta há 15 min desde o primeiro lembrete. Mostre que você tá pronta pra ajudar — ex: "Tô aqui, qualquer coisa me sinaliza!" ou "Posso adiantar a análise assim que tiver o endereço". NÃO ofereça "mais tarde" / "depois" / "outro horário". UMA frase. Tom leve e propositivo. ${nameHint}`,
+    3: `Gere um follow-up CURTO. Contexto: sem resposta há ~2 horas. Reforce o BENEFÍCIO de continuar (ex: "Em 5 min de conversa eu te mando uma simulação da economia" ou similar). Sem cobrança, sem oferecer "mais tarde". UMA frase. ${nameHint}`,
+    4: `Gere um follow-up para a manhã do dia seguinte (são 7 da manhã). Comece com "Bom dia!" e retome o assunto onde parou de forma leve e positiva. Não ofereça "mais tarde". Tom de novo dia, otimista. 1-2 frases curtas. ${nameHint}`,
     5: `Gere o último follow-up, 2 dias depois sem resposta. Algo como "ainda estou por aqui se precisar". Tom respeitoso, sem pressão, deixando a porta aberta. UMA frase. ${nameHint}`,
   }
 
