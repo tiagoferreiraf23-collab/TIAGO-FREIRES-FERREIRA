@@ -21,7 +21,12 @@ COPY apps/dashboard ./apps/dashboard
 # shared must compile first because dashboard imports from its dist
 RUN npm run build --workspace=packages/shared
 
-# Next 14 standalone build — produces a minimal node server bundle
+# Next 14 standalone build — produces a minimal node server bundle.
+# NEXT_PUBLIC_* vars are baked into the client bundle AT BUILD TIME, so we
+# must declare them as ARGs and re-export as ENV before `next build`.
+# Railway automatically passes service env vars as --build-arg.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 WORKDIR /app/apps/dashboard
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
