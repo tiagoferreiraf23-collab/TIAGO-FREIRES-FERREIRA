@@ -42,7 +42,9 @@ async function buildApp() {
 
   // ─── Plugins ───────────────────────────────────────────────────────────────
   await app.register(cors, {
-    origin: env.isProduction ? ['http://localhost:3001'] : true,
+    origin: env.isProduction
+      ? ['http://localhost:3001', /^https://[a-z0-9-]+.up.railway.app$/]
+      : true,
     credentials: true,
   })
 
