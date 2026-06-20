@@ -42,6 +42,27 @@ export async function processFollowUp(data: {
     return
   }
 
+  // Defensive check #1: visit already scheduled (date persisted) — skip
+  // even if lead.status was downgraded back to CONTACTED by a later inbound message.
+  // Production bug 2026-06-20: lead replied "obg" after handoff, status reverted
+  // to CONTACTED, follow-up fired next morning ignoring the booked visit.
+  if (lead.scheduledAt) {
+    log.info(
+      { leadId: lead.id, scheduledAt: lead.scheduledAt },
+      'Visit already scheduled, skipping follow-up',
+    )
+    return
+  }
+
+  // Defensive check #2: consultant already assigned (handoff happened) — skip
+  if (lead.consultantId) {
+    log.info(
+      { leadId: lead.id, consultantId: lead.consultantId },
+      'Consultant already assigned, skipping follow-up',
+    )
+    return
+  }
+
   const conversation = lead.conversations[0]
   if (!conversation) {
     log.warn({ leadId: lead.id }, 'No conversation found for follow-up')
