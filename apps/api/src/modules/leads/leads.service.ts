@@ -2,7 +2,7 @@ import { createChildLogger } from '../../logger'
 import { createLead, findLeadByPhone } from './leads.repository'
 import { prisma } from '../../prisma/client'
 import { enqueueNewLead } from '../../queues'
-import { LeadStatus } from '@sdr-solar/shared'
+import { LeadStatus, ConversationState } from '@sdr-solar/shared'
 import type { MetaLeadPayload } from '@sdr-solar/shared'
 
 const log = createChildLogger('leads')
@@ -64,14 +64,54 @@ export async function processIncomingWhatsApp(data: {
     lead = { ...newLead, conversations: [] }
   }
 
-  // Atomic upsert by activeKey eliminates race condition when two messages
-  // arrive simultaneously — the DB unique constraint serializes the operation.
-  const conversation = await prisma.conversation.upsert({
+  // Find or create the active conversation for this lead.
+  //
+  // Order of preference:
+  //   1. Existing conversation with activeKey = lead.id (open session)
+  //   2. Recently closed conversation (ESCALATED/CLOSED/NO_RESPONSE within the last 30 days) → REOPEN it
+  //   3. Create a brand-new INITIAL_CONTACT conversation
+  //
+  // Rationale: bug production 2026-07-03 (Robson) — Ana confirmed visit + handoff,
+  // conversation flipped to ESCALATED and activeKey went null. When the lead
+  // replied "Ok" the next morning, no active conversation was found → new one
+  // created → Ana greeted him as a stranger ("Oi, tudo bem? Eu sou a Ana...")
+  // because the fresh conversation had no history. Reopening the escalated
+  // conversation keeps the history intact and Ana responds contextually.
+  const REOPEN_WINDOW_DAYS = 30
+  const cutoff = new Date(Date.now() - REOPEN_WINDOW_DAYS * 24 * 3600 * 1000)
+
+  let conversation = await prisma.conversation.findUnique({
     where: { activeKey: lead.id },
-    create: { leadId: lead.id, state: 'INITIAL_CONTACT', activeKey: lead.id },
-    update: {}, // no-op if already exists
     include: { messages: true },
   })
+
+  if (!conversation) {
+    const recentlyClosed = await prisma.conversation.findFirst({
+      where: {
+        leadId: lead.id,
+        activeKey: null,
+        state: { in: [ConversationState.ESCALATED, ConversationState.CLOSED, ConversationState.NO_RESPONSE] },
+        updatedAt: { gte: cutoff },
+      },
+      orderBy: { updatedAt: 'desc' },
+    })
+    if (recentlyClosed) {
+      conversation = await prisma.conversation.update({
+        where: { id: recentlyClosed.id },
+        data: { activeKey: lead.id, state: ConversationState.QUALIFYING },
+        include: { messages: true },
+      })
+      log.info(
+        { leadId: lead.id, convId: conversation.id, previousState: recentlyClosed.state },
+        'Reopened previously closed conversation instead of creating a new one',
+      )
+    } else {
+      conversation = await prisma.conversation.create({
+        data: { leadId: lead.id, state: 'INITIAL_CONTACT', activeKey: lead.id },
+        include: { messages: true },
+      })
+    }
+  }
 
   // Update last contact + always persist the real JID we received so we reply to the right channel
   const jidUpdate = data.phone.includes('@') ? { whatsappJid: data.phone } : {}
