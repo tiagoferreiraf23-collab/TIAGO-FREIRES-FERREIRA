@@ -68,8 +68,9 @@ export async function checkCalendar(
         let current = startDate
         while (current.isBefore(endDate)) {
           const dayOfWeek = current.day()
-          if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-            // Not weekend
+          if (dayOfWeek !== 0) {
+            // Ecolare atende segunda a sábado (só descarta domingo).
+            // Prompt da Ana já diz "engenheiro se adapta, inclusive sábado".
             // Slots cheios de hora em hora — visita dura 2h, mas mostramos só o início.
             // Manhã: 8-11 (last start 11h, ends 13h) | Tarde: 12-17 | Noite: 18-19 (last start 19h, ends 21h)
             // Noite só oferece se lead pedir explicitamente.
@@ -249,7 +250,8 @@ async function generateFallbackSlots(): Promise<VisitSlot[]> {
   let day = dayjs().add(1, 'day').hour(0).minute(0).second(0)
   let daysAdded = 0
   while (daysAdded < 5 && slots.length < 10) {
-    if (day.day() !== 0 && day.day() !== 6) {
+    if (day.day() !== 0) {
+      // Ecolare atende sábado — só pula domingo
       for (const hour of hourSlots) {
         const start = day.hour(hour).minute(0).second(0)
         slots.push({
