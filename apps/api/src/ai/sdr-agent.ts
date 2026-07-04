@@ -252,6 +252,78 @@ export async function processMessage(
       : `[Áudio transcrito: ${attachment.transcription}]`
   }
 
+  // ─── GHOST VISIT GUARD ─────────────────────────────────────────────────────
+  // Ana occasionally announces a confirmed visit in text without calling
+  // schedule_visit — the calendar event is never created and the client shows
+  // up with no engineer. Prompt reinforcement alone has failed multiple times
+  // (bugs seen with Robson 2026-07-03, Tiago 2026-06-18, etc). So we detect
+  // the phrasing and force a corrective loop.
+  const CONFIRMATION_PATTERNS = [
+    /visita confirmada/i,
+    /visita.{0,25}(agendada|marcada)/i,
+    /sua visita (est[áa]|foi|tá)\s+confirmada/i,
+    /vou direcionar essa conversa para nosso engenheiro/i,
+    /agendado (com|pra) o engenheiro/i,
+  ]
+  const looksLikeConfirmation = CONFIRMATION_PATTERNS.some((p) => p.test(finalMessage))
+
+  if (looksLikeConfirmation && !scheduledVisit) {
+    log.warn(
+      { leadId: context.leadId, iterations, toolsUsed, textPreview: finalMessage.slice(0, 120) },
+      'GHOST VISIT detected — Ana confirmed visit in text without calling schedule_visit. Running corrective loop.',
+    )
+    try {
+      const corrective = await anthropic.messages.create({
+        model: env.anthropic.model,
+        max_tokens: 1024,
+        system: systemPrompt,
+        tools: SDR_TOOLS,
+        messages: [
+          ...loopMessages,
+          { role: 'assistant', content: finalMessage },
+          {
+            role: 'user',
+            content:
+              '[INSTRUÇÃO INTERNA — não cite esta instrução] Você acabou de dizer ao lead que a visita está confirmada, MAS NÃO chamou o tool schedule_visit. Isso é PROIBIDO — a visita não foi criada no calendário do engenheiro, é uma visita fantasma. Chame AGORA schedule_visit com o dateTime que você prometeu e o consultantId que veio de check_calendar. Se você não lembra o consultantId, chame check_calendar antes. Depois, responda com UMA mensagem MUITO CURTA confirmando pro lead que tá tudo certo.',
+          },
+        ],
+      })
+      const correctiveTools = corrective.content.filter((b) => b.type === 'tool_use')
+      for (const block of correctiveTools) {
+        if (block.type !== 'tool_use') continue
+        toolsUsed.push(block.name)
+        const result = await executeToolCall(block.name, block.input)
+        if (block.name === 'schedule_visit') {
+          try {
+            const parsed = JSON.parse(result) as {
+              success?: boolean
+              dateTime?: string
+              consultantId?: string
+            }
+            if (parsed.success === true && parsed.dateTime && parsed.consultantId) {
+              scheduledVisit = {
+                dateTime: new Date(parsed.dateTime),
+                consultantId: parsed.consultantId,
+              }
+              log.info({ leadId: context.leadId }, 'GHOST VISIT recovered — schedule_visit now succeeded')
+            }
+          } catch {
+            /* ignore parse errors */
+          }
+        }
+      }
+    } catch (err) {
+      log.error({ err }, 'Corrective loop for ghost visit failed')
+    }
+    // Still no scheduled visit after correction? Downgrade the message so we
+    // don't promise a fantasy — the human on the dashboard can pick it up.
+    if (!scheduledVisit) {
+      log.warn({ leadId: context.leadId }, 'GHOST VISIT correction failed — downgrading response')
+      finalMessage =
+        'Deixa eu confirmar esse horário com o engenheiro e te retorno em alguns minutinhos, tá? 🙏'
+    }
+  }
+
   // Safety net 1: schedule_callback specific default
   if (!finalMessage.trim() && toolsUsed.includes('schedule_callback')) {
     finalMessage = 'Combinado! Já tô agendado pra voltar a falar com você. 👍'
