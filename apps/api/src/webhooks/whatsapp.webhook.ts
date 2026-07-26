@@ -63,6 +63,17 @@ interface MetaCloudWebhookBody {
           document?: { id?: string; mime_type?: string; filename?: string; caption?: string }
           location?: { latitude?: number; longitude?: number; name?: string; address?: string }
           interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } }
+          // Present when the message originated from a Click-to-WhatsApp ad (CTWA).
+          // source_id = the ad id — this is our attribution link back to Meta Ads.
+          referral?: {
+            source_url?: string
+            source_id?: string
+            source_type?: string     // "ad" | "post"
+            headline?: string
+            body?: string
+            media_type?: string
+            ctwa_clid?: string
+          }
         }>
         statuses?: Array<{ id?: string; status?: string; recipient_id?: string }>
       }
@@ -87,6 +98,14 @@ interface NormalizedIncoming {
     latitude?: number
     longitude?: number
     caption?: string
+  }
+  // Attribution when the lead arrived via Click-to-WhatsApp ad (CTWA)
+  referral?: {
+    sourceId?: string
+    sourceType?: string
+    sourceUrl?: string
+    headline?: string
+    ctwaClid?: string
   }
 }
 
@@ -141,6 +160,17 @@ function normalize(body: unknown): NormalizedIncoming | null {
       }
     }
 
+    // CTWA attribution — present when the lead clicked a Click-to-WhatsApp ad
+    const referral = msg.referral
+      ? {
+          sourceId: msg.referral.source_id,
+          sourceType: msg.referral.source_type,
+          sourceUrl: msg.referral.source_url,
+          headline: msg.referral.headline,
+          ctwaClid: msg.referral.ctwa_clid,
+        }
+      : undefined
+
     return {
       phone: msg.from ?? '',
       text: baseText,
@@ -150,6 +180,7 @@ function normalize(body: unknown): NormalizedIncoming | null {
       fromMe: false,
       isGroup: false,
       pendingMedia,
+      referral,
     }
   }
 
@@ -242,6 +273,7 @@ async function resolveAndProcess(incoming: NormalizedIncoming): Promise<void> {
     messageId: incoming.messageId,
     timestamp: incoming.timestamp,
     pushName: incoming.pushName,
+    referral: incoming.referral,
   })
 }
 

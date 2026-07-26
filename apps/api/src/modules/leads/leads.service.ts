@@ -44,6 +44,15 @@ export async function processIncomingWhatsApp(data: {
   messageId: string
   timestamp: number
   pushName?: string
+  // Present when the message came from a Click-to-WhatsApp ad (CTWA).
+  // sourceId = Meta ad id — persisted on the lead for attribution.
+  referral?: {
+    sourceId?: string
+    sourceType?: string
+    sourceUrl?: string
+    headline?: string
+    ctwaClid?: string
+  }
 }): Promise<void> {
   let lead = await findLeadByPhone(data.phone)
 
@@ -54,14 +63,27 @@ export async function processIncomingWhatsApp(data: {
     const storePhone = isJid ? (numericPhone || data.phone) : data.phone
     const storeJid = isJid ? data.phone : undefined
 
-    log.info({ phone: storePhone, jid: storeJid, pushName: data.pushName }, 'New WhatsApp contact, creating lead')
+    const isCtwa = !!data.referral?.sourceId
+    log.info(
+      { phone: storePhone, jid: storeJid, pushName: data.pushName, ctwa: isCtwa, adId: data.referral?.sourceId, adHeadline: data.referral?.headline },
+      isCtwa ? 'New CTWA contact (ad click), creating lead' : 'New WhatsApp contact, creating lead',
+    )
     const newLead = await createLead({
       name: data.pushName ?? storePhone,
       phone: storePhone,
       whatsappJid: storeJid,
-      source: 'whatsapp_inbound',
+      source: isCtwa ? 'ctwa' : 'whatsapp_inbound',
+      adId: data.referral?.sourceId,
     })
     lead = { ...newLead, conversations: [] }
+  } else if (data.referral?.sourceId && !lead.adId) {
+    // Lead já existia (ex: veio de campanha CSV) e agora clicou num anúncio CTWA.
+    // Preenche a atribuição que faltava sem sobrescrever o source original.
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: { adId: data.referral.sourceId },
+    })
+    log.info({ leadId: lead.id, adId: data.referral.sourceId }, 'Existing lead re-engaged via CTWA ad — attribution backfilled')
   }
 
   // Find or create the active conversation for this lead.
