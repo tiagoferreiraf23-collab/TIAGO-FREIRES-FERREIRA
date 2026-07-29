@@ -41,17 +41,42 @@ export async function handleIncomingMessage(data: {
     return
   }
 
-  // AI pausada (modo humano) — só salva a mensagem do lead e sai.
-  // O atendente humano vai responder pelo painel/dashboard.
-  if (conversation.aiPaused) {
-    await prisma.message.create({
-      data: {
-        conversationId: data.conversationId,
-        role: 'user',
-        content: data.message,
-        sentAt: new Date(),
-      },
+  // ─── PERSISTÊNCIA NA CHEGADA (crash-safe) ─────────────────────────────────
+  // Grava a mensagem do lead IMEDIATAMENTE, antes de qualquer processamento.
+  // Motivo: bug produção 2026-07-29 — 4 de 9 leads CTWA tiveram o inbound
+  // perdido porque a mensagem só era salva no FIM do processMessage; qualquer
+  // falha no meio (Anthropic, DB blip do Railway) perdia o texto pra sempre.
+  //
+  // Dedup por whatsappId: Meta pode redeliver o mesmo wamid (retry de webhook)
+  // e o BullMQ pode reprocessar o job — nos dois casos, se a mensagem já
+  // existe, não processa de novo (evita resposta duplicada da Ana).
+  if (data.messageId) {
+    const alreadySeen = await prisma.message.findFirst({
+      where: { whatsappId: data.messageId },
+      select: { id: true },
     })
+    if (alreadySeen) {
+      log.info(
+        { conversationId: data.conversationId, whatsappId: data.messageId },
+        'Duplicate inbound (wamid already persisted) — skipping reprocess',
+      )
+      return
+    }
+  }
+
+  await prisma.message.create({
+    data: {
+      conversationId: data.conversationId,
+      role: 'user',
+      content: data.message,
+      whatsappId: data.messageId || undefined,
+      sentAt: new Date(),
+    },
+  })
+
+  // AI pausada (modo humano) — mensagem do lead já está salva acima; o
+  // atendente humano responde pelo painel/dashboard.
+  if (conversation.aiPaused) {
     log.info({ conversationId: data.conversationId }, 'AI paused — incoming message saved without auto-response')
     return
   }
@@ -72,15 +97,22 @@ export async function handleIncomingMessage(data: {
 
   log.info({ leadId: lead.id, conversationId: data.conversationId, messagePreview: data.message.slice(0, 60) }, 'Processing incoming message')
 
-  const agentResponse = await processMessage(data.message, {
-    leadId: lead.id,
-    leadName: lead.name,
-    energyBill: lead.energyBill ?? undefined,
-    city: lead.city ?? undefined,
-    propertyType: lead.propertyType ?? undefined,
-    followUpCount: lead.followUpCount,
-    conversationId: data.conversationId,
-  })
+  const agentResponse = await processMessage(
+    data.message,
+    {
+      leadId: lead.id,
+      leadName: lead.name,
+      energyBill: lead.energyBill ?? undefined,
+      city: lead.city ?? undefined,
+      propertyType: lead.propertyType ?? undefined,
+      followUpCount: lead.followUpCount,
+      conversationId: data.conversationId,
+    },
+    undefined,
+    // Mensagem do lead já foi persistida na chegada (bloco acima) — o agent
+    // grava só a resposta da Ana.
+    { userMessagePersisted: true },
+  )
 
   // Send the text response
   if (agentResponse.message) {
@@ -130,6 +162,35 @@ export async function handleIncomingMessage(data: {
         agentResponse.scheduledVisit.dateTime,
       ),
     ])
+    return
+  }
+
+  // ─── RECUSA EXPLÍCITA → FECHA E PARA ──────────────────────────────────────
+  // Bug produção 2026-07-29 (lead Angelica): recusou 3x e recebeu 5+ follow-ups
+  // porque cada resposta da Ana re-armava o timer e nada fechava a conversa.
+  // Recusa clara = despedida educada da Ana (já enviada acima) + conversa
+  // CLOSED + zero follow-up. Se o lead voltar, o reopen (30 dias) reabre com
+  // histórico intacto.
+  const REFUSAL_PATTERNS = [
+    /n[ãa]o (quero|tenho interesse|preciso|me interessa)/i,
+    /sem interesse/i,
+    /n[ãa]o tenho (necessidade|interesse)/i,
+    /j[áa] tenho (energia solar|solar|placa|sistema)/i,
+    /me (tira|remove|exclui) (da lista|dos contatos)/i,
+    /para de (me )?(mandar|enviar|chamar)/i,
+    /n[ãa]o (me )?mand[ea] mais/i,
+  ]
+  const leadRefused = REFUSAL_PATTERNS.some((p) => p.test(data.message))
+  if (leadRefused && !agentResponse.scheduledVisit) {
+    await prisma.conversation.update({
+      where: { id: data.conversationId },
+      // Estado terminal + activeKey livre pra um eventual retorno futuro
+      data: { state: ConversationState.CLOSED as unknown as 'INITIAL_CONTACT', activeKey: null },
+    })
+    log.info(
+      { leadId: lead.id, conversationId: data.conversationId, messagePreview: data.message.slice(0, 50) },
+      'Lead explicitly refused — conversation CLOSED, no follow-up scheduled',
+    )
     return
   }
 

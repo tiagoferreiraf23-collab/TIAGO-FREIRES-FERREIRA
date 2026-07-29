@@ -44,6 +44,10 @@ export async function processMessage(
   incomingMessage: string,
   context: ConversationContext,
   attachment?: MessageAttachment,
+  // userMessagePersisted: caller already saved the lead's message on receipt
+  // (crash-safe persistence with whatsappId dedup — see conversations.service).
+  // When true, we only persist Ana's reply here.
+  options?: { userMessagePersisted?: boolean },
 ): Promise<AgentResponse> {
   log.info(
     { leadId: context.leadId, message: incomingMessage.slice(0, 80), attachmentType: attachment?.type },
@@ -366,23 +370,32 @@ export async function processMessage(
     }
   }
 
-  // Save both messages to DB
-  await prisma.message.createMany({
-    data: [
-      {
-        conversationId: context.conversationId,
-        role: MessageRole.USER,
-        content: userContentForDb,
-        sentAt: new Date(),
-      },
-      {
-        conversationId: context.conversationId,
-        role: MessageRole.ASSISTANT,
-        content: finalMessage,
-        sentAt: new Date(),
-      },
-    ],
-  })
+  // Save messages to DB. If the caller already persisted the user's message on
+  // receipt (crash-safe path), only Ana's reply is saved here — avoids duplicates.
+  const messagesToSave = options?.userMessagePersisted
+    ? [
+        {
+          conversationId: context.conversationId,
+          role: MessageRole.ASSISTANT,
+          content: finalMessage,
+          sentAt: new Date(),
+        },
+      ]
+    : [
+        {
+          conversationId: context.conversationId,
+          role: MessageRole.USER,
+          content: userContentForDb,
+          sentAt: new Date(),
+        },
+        {
+          conversationId: context.conversationId,
+          role: MessageRole.ASSISTANT,
+          content: finalMessage,
+          sentAt: new Date(),
+        },
+      ]
+  await prisma.message.createMany({ data: messagesToSave })
 
   log.info(
     { leadId: context.leadId, toolsUsed, escalated, hasScheduledVisit: !!scheduledVisit },
