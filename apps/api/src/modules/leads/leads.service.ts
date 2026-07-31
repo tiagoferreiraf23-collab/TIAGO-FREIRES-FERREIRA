@@ -187,12 +187,22 @@ function parseMetaFormData(fieldData: Array<{ name: string; values: string[] }>)
     fields['cidade'] ??
     undefined
 
-  const energyBillRaw =
+  let energyBillRaw =
     fields['energy_bill'] ??
     fields['conta_energia'] ??
     fields['valor_conta'] ??
     fields['conta_de_luz'] ??
     ''
+
+  // Fallback genérico: formulários reais usam nomes longos tipo
+  // "qual_o_valor_médio_da_sua_conta_de_luz?" — casa qualquer chave que
+  // combine "conta" com luz/valor/energia.
+  if (!energyBillRaw) {
+    const contaKey = Object.keys(fields).find(
+      (k) => k.includes('conta') && (k.includes('luz') || k.includes('valor') || k.includes('energia')),
+    )
+    if (contaKey) energyBillRaw = fields[contaKey]
+  }
 
   const energyBill = energyBillRaw ? parseEnergyBill(energyBillRaw) : undefined
 
@@ -206,7 +216,12 @@ function parseMetaFormData(fieldData: Array<{ name: string; values: string[] }>)
 }
 
 function parseEnergyBill(raw: string): number | undefined {
-  const cleaned = raw.replace(/[R$\s.]/g, '').replace(',', '.')
-  const value = parseFloat(cleaned)
-  return isNaN(value) ? undefined : value
+  // Aceita número puro ("450"), moeda ("R$ 450,00") e as FAIXAS dos
+  // formulários Meta: "r$300_a_r$500" → 400 (ponto médio),
+  // "até_r$300" → 300, "acima_de_r$1.000" → 1000.
+  const cleaned = raw.replace(/[.\s]/g, '').replace(',', '.')
+  const nums = cleaned.match(/\d+(?:\.\d+)?/g)?.map(Number).filter((n) => !isNaN(n) && n > 0) ?? []
+  if (nums.length === 0) return undefined
+  if (nums.length >= 2) return Math.round((nums[0] + nums[1]) / 2)
+  return nums[0]
 }

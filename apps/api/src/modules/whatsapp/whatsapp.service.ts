@@ -133,6 +133,28 @@ export async function sendMediaMessage(
   return sendMediaEvolution(phone, mediaUrl, mediaType, caption)
 }
 
+/**
+ * Envia um template aprovado do WhatsApp (business-initiated).
+ * Obrigatório pra INICIAR conversa com quem nunca mandou mensagem — texto
+ * livre fora da janela de 24h é rejeitado pela Meta (erro 131047).
+ * Só existe no provider oficial (Meta Cloud API).
+ */
+export async function sendTemplateMessage(
+  phone: string,
+  templateName: string,
+  templateLang: string,
+  bodyParams: string[],
+): Promise<string | null> {
+  if (env.whatsapp.provider !== 'meta') {
+    log.error(
+      { provider: env.whatsapp.provider, templateName },
+      'Template messages require the Meta Cloud API provider',
+    )
+    return null
+  }
+  return sendTemplateMeta(phone, templateName, templateLang, bodyParams)
+}
+
 export async function getInstanceStatus(): Promise<string> {
   if (env.whatsapp.provider === 'meta') return getStatusMeta()
   if (env.whatsapp.provider === 'waha') return getStatusWAHA()
@@ -453,6 +475,60 @@ async function sendMediaMeta(
     return messageId
   } catch (err) {
     log.error({ phone, mediaType, err }, 'Meta: failed to send media')
+    return null
+  }
+}
+
+async function sendTemplateMeta(
+  phone: string,
+  templateName: string,
+  templateLang: string,
+  bodyParams: string[],
+): Promise<string | null> {
+  if (!env.meta.cloudPhoneNumberId || !env.meta.cloudAccessToken) {
+    log.error('Meta Cloud API not configured — set META_CLOUD_PHONE_NUMBER_ID and META_CLOUD_ACCESS_TOKEN')
+    return null
+  }
+  try {
+    const to = toMetaPhone(phone)
+    const { data } = await withRetry(
+      () =>
+        metaCloudApi.post<{ messages?: Array<{ id: string }> }>(
+          `/${env.meta.cloudPhoneNumberId}/messages`,
+          {
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to,
+            type: 'template',
+            template: {
+              name: templateName,
+              language: { code: templateLang },
+              components: bodyParams.length
+                ? [
+                    {
+                      type: 'body',
+                      parameters: bodyParams.map((text) => ({ type: 'text', text })),
+                    },
+                  ]
+                : [],
+            },
+          },
+        ),
+      { label: `meta:sendTemplate:${templateName}:${to}` },
+    )
+    const messageId = data.messages?.[0]?.id ?? null
+    log.info({ phone: to, templateName, messageId, provider: 'meta' }, 'Template message sent')
+    return messageId
+  } catch (err) {
+    if (err instanceof AxiosError) {
+      const errBody = err.response?.data as { error?: { message?: string; code?: number; error_data?: unknown } }
+      log.error(
+        { phone, templateName, status: err.response?.status, metaError: errBody?.error, provider: 'meta' },
+        'Meta: failed to send template',
+      )
+    } else {
+      log.error({ phone, templateName, err }, 'Meta: failed to send template')
+    }
     return null
   }
 }
