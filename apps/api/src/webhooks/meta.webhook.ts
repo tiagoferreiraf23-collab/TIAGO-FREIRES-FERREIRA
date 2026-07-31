@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import crypto from 'crypto'
 import axios from 'axios'
-import rawBodyPlugin from 'fastify-raw-body'
 import { env } from '../config'
 import { createChildLogger } from '../logger'
 import { processMetaLead } from '../modules/leads/leads.service'
@@ -28,17 +27,23 @@ interface MetaWebhookBody {
 }
 
 export async function registerMetaWebhook(app: FastifyInstance): Promise<void> {
-  // fastify-raw-body expõe request.rawBody (Buffer) nas rotas com
-  // config.rawBody = true — obrigatório pra validar a assinatura HMAC do Meta.
-  // BUG histórico (corrigido 2026-07-31): o plugin nunca foi registrado; todo
-  // POST real do Meta explodia em 500 no createHmac(undefined) e o leadgen
-  // nunca chegou. O plugin usa fastify-plugin, então registrar aqui vale pro
-  // app inteiro; global:false limita a captura às rotas que pedem.
-  await app.register(rawBodyPlugin, {
-    field: 'rawBody',
-    global: false,
-    encoding: false, // Buffer cru, byte a byte, como o Meta assinou
-    runFirst: true,
+  // Captura o corpo BRUTO (Buffer) de todo JSON pra validar a assinatura HMAC
+  // do Meta byte a byte. Substitui o parser JSON padrão do Fastify — mesmo
+  // comportamento, com request.rawBody anexado.
+  //
+  // BUG histórico (corrigido 2026-07-31): o código original esperava o plugin
+  // fastify-raw-body, que nunca foi instalado — todo POST real do Meta
+  // explodia em 500 no createHmac(undefined) e o leadgen nunca chegou.
+  // Implementação nativa: zero dependência, zero surpresa de Docker/npm.
+  app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
+    const buf = body as Buffer
+    ;(req as unknown as { rawBody?: Buffer }).rawBody = buf
+    try {
+      done(null, JSON.parse(buf.toString('utf8')))
+    } catch (err) {
+      ;(err as { statusCode?: number }).statusCode = 400
+      done(err as Error, undefined)
+    }
   })
 
   // Webhook verification (GET)
