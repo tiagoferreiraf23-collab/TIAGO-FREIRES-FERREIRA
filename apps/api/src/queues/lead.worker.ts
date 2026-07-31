@@ -10,13 +10,14 @@ const log = createChildLogger('lead-worker')
 // a Meta EXIGE template aprovado (texto livre fora da janela de 24h = erro
 // 131047, falha silenciosa — bug que manteve o fluxo automático morto até
 // 2026-07-31 e forçava campanhas manuais via CSV).
-const INITIAL_TEMPLATE_NAME = 'boas_vindas_novos_leads_jul_2026'
+const INITIAL_TEMPLATE_NAME = 'reativacao_leads_jun_2026'
 const INITIAL_TEMPLATE_LANG = 'pt_BR'
 
-// Corpo EXATO aprovado no Meta — persistido no histórico pra Ana ler o que o
-// lead realmente recebeu (regra anti-bug-Eliane).
+// Corpo EXATO aprovado no Meta (editado 2026-07-31: removido "este mês" pra
+// ficar atemporal) — persistido no histórico pra Ana ler o que o lead
+// realmente recebeu (regra anti-bug-Eliane).
 function renderInitialTemplate(firstName: string): string {
-  return `Oi, ${firstName}! 👋 Aqui é a Ana, da Ecolare Energia Solar.\nVi que você acabou de se cadastrar. Aqui em Fortaleza, a maioria dos nossos clientes economiza mais de 80% na conta de luz com solar.\nMe manda o valor médio da sua conta que eu já te passo uma estimativa personalizada da sua economia. 🌞`
+  return `Oi, ${firstName}! Aqui é a Ana, consultora da Ecolare Energia Solar 🌞\n\nVocê preencheu nosso formulário sobre energia solar. Posso fazer uma análise rápida e te mostrar quanto você economizaria por mês. Pode ser?`
 }
 
 export async function processNewLead(data: { leadId: string }): Promise<void> {
