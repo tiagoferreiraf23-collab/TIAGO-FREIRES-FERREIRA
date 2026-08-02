@@ -1,5 +1,7 @@
 import { google } from 'googleapis'
 import dayjs from 'dayjs'
+import utc from 'dayjs/plugin/utc'
+import timezone from 'dayjs/plugin/timezone'
 import 'dayjs/locale/pt-br'
 import { env } from '../../config'
 import { createChildLogger } from '../../logger'
@@ -7,7 +9,14 @@ import { prisma } from '../../prisma/client'
 import { LeadStatus } from '@sdr-solar/shared'
 import type { VisitSlot } from '@sdr-solar/shared'
 
+dayjs.extend(utc)
+dayjs.extend(timezone)
 dayjs.locale('pt-br')
+
+// Fuso de Fortaleza. O servidor (Railway) roda em UTC — sem ancorar os slots
+// aqui, hour(9) vira 9h UTC = 6h BRT e a janela de busy-check fica deslocada
+// 3 horas da agenda real (bug que fazia a Ana oferecer horário ocupado).
+const TZ = 'America/Sao_Paulo'
 
 const log = createChildLogger('scheduling')
 
@@ -43,7 +52,9 @@ export async function checkCalendar(
     const slots: VisitSlot[] = []
     const calendar = getCalendarClient()
 
-    const startDate = dayjs().add(1, 'day').startOf('day')
+    // Ancorado em BRT: startOf('day') e hour() abaixo operam no relógio de
+    // Fortaleza, independente do fuso do servidor.
+    const startDate = dayjs().tz(TZ).add(1, 'day').startOf('day')
     const endDate = startDate.add(7, 'day').endOf('day')
 
     // Track if at least one calendar lookup succeeded. If all of them fail
@@ -138,7 +149,7 @@ export async function scheduleVisit(
   leadId: string,
   dateTime: Date,
   consultantId: string,
-): Promise<{ success: boolean; error?: string; eventId?: string; dateTime?: string; consultantName?: string; consultantId?: string }> {
+): Promise<{ success: boolean; error?: string; message?: string; eventId?: string; dateTime?: string; consultantName?: string; consultantId?: string }> {
   try {
     const [lead, consultantById] = await Promise.all([
       prisma.lead.findUnique({ where: { id: leadId } }),
@@ -179,6 +190,35 @@ export async function scheduleVisit(
 
     const calendar = getCalendarClient()
     const endTime = dayjs(dateTime).add(2, 'hour').toDate()
+
+    // ─── TRAVA ANTI-COLISÃO ──────────────────────────────────────────────────
+    // Re-checa o freebusy DESTE slot imediatamente antes de criar o evento.
+    // Entre a oferta e o aceite do lead, outra conversa simultânea pode ter
+    // tomado o horário — sem esta trava, o insert cria evento em cima de
+    // evento (double-booking silencioso).
+    try {
+      const fb = await calendar.freebusy.query({
+        requestBody: {
+          timeMin: dateTime.toISOString(),
+          timeMax: endTime.toISOString(),
+          items: [{ id: consultant.calendarId }],
+        },
+      })
+      const busy = fb.data.calendars?.[consultant.calendarId]?.busy ?? []
+      if (busy.length > 0) {
+        log.warn({ leadId, dateTime: dateTime.toISOString(), busy }, 'scheduleVisit: slot já ocupado — insert abortado')
+        return {
+          success: false,
+          error: 'slot_taken',
+          message:
+            'Esse horário acabou de ser ocupado na agenda do engenheiro. Chame check_calendar novamente e ofereça outro horário ao lead — NÃO confirme este.',
+        }
+      }
+    } catch (err) {
+      // Checagem falhou (ex: instabilidade da API) — não bloqueia o agendamento;
+      // se a auth estiver quebrada, o próprio insert falha logo abaixo.
+      log.warn({ leadId, err }, 'scheduleVisit: freebusy pre-check falhou — seguindo pro insert')
+    }
 
     const event = await calendar.events.insert({
       calendarId: consultant.calendarId,
@@ -247,7 +287,7 @@ async function generateFallbackSlots(): Promise<VisitSlot[]> {
   const slots: VisitSlot[] = []
   const hourSlots = [8, 9, 10, 11, 14, 15, 16] // alguns horários espalhados em dia útil
   // Começa amanhã (não em 2 dias) pra Ana ter algo concreto pra oferecer ainda hoje
-  let day = dayjs().add(1, 'day').hour(0).minute(0).second(0)
+  let day = dayjs().tz(TZ).add(1, 'day').hour(0).minute(0).second(0)
   let daysAdded = 0
   while (daysAdded < 5 && slots.length < 10) {
     if (day.day() !== 0) {

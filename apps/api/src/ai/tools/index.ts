@@ -348,10 +348,11 @@ export async function executeToolCall(
 }
 
 function formatSlotForDisplay(date: Date): string {
+  // Sempre no relógio de Fortaleza — getDay()/getHours() usariam o fuso do
+  // servidor (UTC no Railway) e rotulariam o slot com 3h de deslocamento.
+  const d = dayjs(date).tz('America/Sao_Paulo')
   const days = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
-  const day = days[date.getDay()]
-  const dateStr = date.toLocaleDateString('pt-BR')
-  const hours = date.getHours()
-  const period = hours < 12 ? 'manhã' : 'tarde'
-  return `${day}, ${dateStr} às ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (${period})`
+  const day = days[d.day()]
+  const period = d.hour() < 12 ? 'manhã' : 'tarde'
+  return `${day}, ${d.format('DD/MM/YYYY')} às ${d.format('HH:mm')} (${period})`
 }
