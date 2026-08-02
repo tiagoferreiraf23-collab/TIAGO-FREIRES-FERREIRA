@@ -50,29 +50,51 @@ export async function handleIncomingMessage(data: {
   // Dedup por whatsappId: Meta pode redeliver o mesmo wamid (retry de webhook)
   // e o BullMQ pode reprocessar o job — nos dois casos, se a mensagem já
   // existe, não processa de novo (evita resposta duplicada da Ana).
+  let userAlreadyPersisted = false
   if (data.messageId) {
     const alreadySeen = await prisma.message.findFirst({
       where: { whatsappId: data.messageId },
-      select: { id: true },
+      select: { id: true, conversationId: true, sentAt: true },
     })
     if (alreadySeen) {
-      log.info(
+      // Persistida ≠ respondida. Se o processamento morreu DEPOIS do persist
+      // (ex: Anthropic sem saldo — apagão 2026-08-02), o retry do BullMQ cai
+      // aqui; pular sempre deixava a Ana muda pra sempre. Só é duplicata de
+      // verdade se já existe resposta da Ana posterior à mensagem.
+      const answered = await prisma.message.findFirst({
+        where: {
+          conversationId: alreadySeen.conversationId,
+          role: 'assistant',
+          sentAt: { gte: alreadySeen.sentAt },
+        },
+        select: { id: true },
+      })
+      if (answered) {
+        log.info(
+          { conversationId: data.conversationId, whatsappId: data.messageId },
+          'Duplicate inbound (wamid persisted AND answered) — skipping reprocess',
+        )
+        return
+      }
+      log.warn(
         { conversationId: data.conversationId, whatsappId: data.messageId },
-        'Duplicate inbound (wamid already persisted) — skipping reprocess',
+        'Inbound persisted but UNANSWERED — reprocessing (previous attempt died mid-flight)',
       )
-      return
+      userAlreadyPersisted = true
     }
   }
 
-  await prisma.message.create({
-    data: {
-      conversationId: data.conversationId,
-      role: 'user',
-      content: data.message,
-      whatsappId: data.messageId || undefined,
-      sentAt: new Date(),
-    },
-  })
+  if (!userAlreadyPersisted) {
+    await prisma.message.create({
+      data: {
+        conversationId: data.conversationId,
+        role: 'user',
+        content: data.message,
+        whatsappId: data.messageId || undefined,
+        sentAt: new Date(),
+      },
+    })
+  }
 
   // AI pausada (modo humano) — mensagem do lead já está salva acima; o
   // atendente humano responde pelo painel/dashboard.
