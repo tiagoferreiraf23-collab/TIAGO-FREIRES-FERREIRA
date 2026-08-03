@@ -84,6 +84,8 @@ export const env = {
   notifications: {
     slackWebhookUrl: optionalEnv('SLACK_WEBHOOK_URL'),
     teamWhatsappGroupId: optionalEnv('TEAM_WHATSAPP_GROUP_ID'),
+    // WhatsApp do dono — recebe alertas críticos (ex: saldo Anthropic esgotado)
+    ownerWhatsappPhone: optionalEnv('OWNER_WHATSAPP_PHONE', '558898032895'),
   },
 
   sentry: {

@@ -455,6 +455,10 @@ export async function generateFollowUpMessage(lead: {
   name: string
   followUpCount: number
   energyBill?: number
+  // Últimas mensagens da conversa, formatadas "LEAD:/ANA:". Sem isso o gerador
+  // trabalha CEGO e re-pede dados que o lead já respondeu (bug Aurenice
+  // 2026-08-03: endereço informado às 11h, follow-up das 14h pediu de novo).
+  recentHistory?: string
 }): Promise<string> {
   const firstName = lead.name.split(' ')[0]
   const attempts = lead.followUpCount
@@ -466,6 +470,10 @@ export async function generateFollowUpMessage(lead: {
     ? 'O nome do lead AINDA NÃO foi coletado. NÃO use "Lead" nem "Cliente" como se fosse o nome dele — comece sem nome (ex: "Ei!", "Olá!", "Tudo bem?")'
     : `O nome do lead é ${firstName}. SEMPRE chame ele pelo nome na mensagem.`
 
+  const historyBlock = lead.recentHistory
+    ? `\n\nHISTÓRICO RECENTE DA CONVERSA (leia ANTES de escrever):\n${lead.recentHistory}\n\nREGRAS SOBRE O HISTÓRICO:\n1. NUNCA peça uma informação que o lead JÁ respondeu acima (endereço, conta de luz, cidade, nome...). Se ele já respondeu o que você pediu, retome do PRÓXIMO passo real da conversa.\n2. O follow-up deve continuar a conversa de verdade — referencie o ponto exato em que ela parou.`
+    : ''
+
   const followUpPrompts: Record<number, string> = {
     1: `Gere um follow-up CURTO (1 frase, no máximo 2). Contexto: o lead está em silêncio há 5 minutos desde sua ÚLTIMA pergunta/pedido a ele. RETOME exatamente o ponto onde a conversa parou — repita ou reforce o que você pediu, de forma propositiva e leve. Exemplo: se você pediu o endereço, diga "Tamyris, ainda tô esperando o endereço pra mandar pra equipe técnica analisar 😊". 🚨 NUNCA ofereça "mais tarde" como opção (frase tipo "te chamo depois" ou "consegue me responder agora ou prefere outro horário?" SEMPRE faz o cliente procrastinar — bug confirmado em prod com a lead Tamyris). NUNCA repita cumprimento de apresentação. ${nameHint}`,
     2: `Gere um follow-up CURTO. Contexto: sem resposta há 15 min desde o primeiro lembrete. Mostre que você tá pronta pra ajudar — ex: "Tô aqui, qualquer coisa me sinaliza!" ou "Posso adiantar a análise assim que tiver o endereço". NÃO ofereça "mais tarde" / "depois" / "outro horário". UMA frase. Tom leve e propositivo. ${nameHint}`,
@@ -474,7 +482,7 @@ export async function generateFollowUpMessage(lead: {
     5: `Gere o último follow-up, 2 dias depois sem resposta. Algo como "ainda estou por aqui se precisar". Tom respeitoso, sem pressão, deixando a porta aberta. UMA frase. ${nameHint}`,
   }
 
-  const promptText = followUpPrompts[attempts] ?? followUpPrompts[5]
+  const promptText = (followUpPrompts[attempts] ?? followUpPrompts[5]) + historyBlock
 
   const response = await anthropic.messages.create({
     model: env.anthropic.model,

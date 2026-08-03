@@ -116,10 +116,24 @@ export async function processFollowUp(data: {
 
   log.info({ leadId: lead.id, attempt: data.attempt }, 'Sending follow-up message')
 
+  // Histórico recente pro gerador não trabalhar cego (bug Aurenice 2026-08-03:
+  // follow-up re-pedia endereço que o lead já tinha respondido).
+  const recentMsgs = await prisma.message.findMany({
+    where: { conversationId: conversation.id },
+    orderBy: { sentAt: 'desc' },
+    take: 10,
+    select: { role: true, content: true },
+  })
+  const recentHistory = recentMsgs
+    .reverse()
+    .map((m) => `${m.role === 'assistant' ? 'ANA' : 'LEAD'}: ${m.content.slice(0, 300)}`)
+    .join('\n')
+
   const message = await generateFollowUpMessage({
     name: lead.name,
     followUpCount: data.attempt,
     energyBill: lead.energyBill ?? undefined,
+    recentHistory,
   })
 
   // test_panel leads have no real phone — just persist; the panel polls and shows it

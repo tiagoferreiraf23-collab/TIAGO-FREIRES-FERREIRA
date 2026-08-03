@@ -204,7 +204,51 @@ export function startWorkers(): void {
   startFollowUpWorker()
   startNotificationWorker()
   startScheduledCallbackWorker()
+  startAnthropicWatchdog()
   log.info('All queue workers started')
+}
+
+// ─── Watchdog de saldo Anthropic ─────────────────────────────────────────────
+// 3º apagão em 45 dias (19/06, 28-29/07, 02/08): saldo acaba e a Ana cala sem
+// ninguém perceber — leads respondendo pro vácuo em plena campanha. A cada 4h
+// faz um ping mínimo na API; se falhar por crédito ou chave, alerta o dono no
+// WhatsApp (no máximo 1 alerta a cada 12h pra não virar spam).
+let lastBalanceAlertAt = 0
+
+async function checkAnthropicBalance(): Promise<void> {
+  try {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default
+    const client = new Anthropic({ apiKey: env.anthropic.apiKey })
+    await client.messages.create({
+      model: env.anthropic.model,
+      max_tokens: 1,
+      messages: [{ role: 'user', content: 'ping' }],
+    })
+  } catch (err) {
+    const e = err as { status?: number; error?: { error?: { message?: string } } }
+    const apiMsg = e.error?.error?.message ?? ''
+    const isCredit = e.status === 400 && apiMsg.includes('credit balance')
+    const isAuth = e.status === 401
+    if (!isCredit && !isAuth) return // instabilidade passageira (429/529) não alerta
+
+    if (Date.now() - lastBalanceAlertAt < 12 * 3600 * 1000) return
+    lastBalanceAlertAt = Date.now()
+
+    const { sendTextMessage } = await import('../modules/whatsapp/whatsapp.service')
+    const alert = isCredit
+      ? '🚨 *ANA FORA DO AR — SALDO ANTHROPIC ESGOTADO*\n\nTodo lead que responder agora fica SEM resposta.\n\nRecarregue já: console.anthropic.com/settings/billing\n\n(alerta automático do watchdog — repete em 12h se continuar)'
+      : '🚨 *ANA FORA DO AR — chave da API Anthropic inválida (401)*\n\nVerifique a ANTHROPIC_API_KEY nas Variables do Railway.\n\n(alerta automático do watchdog)'
+    await sendTextMessage(env.notifications.ownerWhatsappPhone, alert).catch(() => undefined)
+    log.error({ isCredit, isAuth }, 'Anthropic watchdog: falha detectada — dono alertado no WhatsApp')
+  }
+}
+
+function startAnthropicWatchdog(): void {
+  const FOUR_HOURS = 4 * 3600 * 1000
+  setInterval(() => void checkAnthropicBalance(), FOUR_HOURS)
+  // Primeira checagem 2min após o boot (deixa o serviço estabilizar)
+  setTimeout(() => void checkAnthropicBalance(), 2 * 60 * 1000)
+  log.info('Anthropic balance watchdog armado (ping a cada 4h)')
 }
 
 function startScheduledCallbackWorker(): void {
